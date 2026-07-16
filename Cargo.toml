@@ -10,6 +10,12 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[dependencies]
+jsonschema.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
 [dev-dependencies]
 biscuit-parser.workspace = true
 wit-parser.workspace = true
