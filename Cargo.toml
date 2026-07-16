@@ -9,3 +9,7 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
+
+[dev-dependencies]
+biscuit-parser.workspace = true
+wit-parser.workspace = true

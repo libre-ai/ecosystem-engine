@@ -1,0 +1,36 @@
+use biscuit_parser::parser::parse_source;
+use std::{fs, path::PathBuf};
+
+const POLICIES: [(&str, usize); 2] = [("sessions-v1.datalog", 7), ("missions-v1.datalog", 6)];
+
+#[test]
+fn canonical_biscuit_policies_parse() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../contracts/authz");
+
+    for (name, expected_policy_count) in POLICIES {
+        let path = root.join(name);
+        let source =
+            fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        let parsed = parse_source(&source)
+            .unwrap_or_else(|errors| panic!("{}: {errors:#?}", path.display()));
+
+        assert_eq!(
+            parsed.policies.len(),
+            expected_policy_count,
+            "{}",
+            path.display()
+        );
+        assert!(
+            parsed.facts.is_empty(),
+            "policies must not inject context facts"
+        );
+        assert!(
+            parsed.rules.is_empty(),
+            "policies must not derive hidden facts"
+        );
+        assert!(
+            parsed.checks.is_empty(),
+            "token checks belong to authority/attenuation blocks"
+        );
+    }
+}
