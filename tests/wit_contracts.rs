@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use wit_parser::WorldItem;
 
 #[test]
 fn canonical_wit_worlds_parse_and_resolve() {
@@ -18,9 +19,36 @@ fn canonical_wit_worlds_parse_and_resolve() {
         "locked and candidate WIT inventory changed"
     );
     for path in worlds {
+        let directory = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("WIT directory name");
         let mut resolve = wit_parser::Resolve::default();
-        resolve
+        let (package_id, _) = resolve
             .push_dir(&path)
             .unwrap_or_else(|error| panic!("{}: {error:#}", path.display()));
+
+        if directory == "radar-engine-v2" {
+            let package = &resolve.packages[package_id];
+            assert_eq!(package.worlds.len(), 1, "{directory}: world count");
+            let world_id = *package.worlds.values().next().expect("resolved WIT world");
+            let world = &resolve.worlds[world_id];
+            assert!(
+                world.imports.is_empty(),
+                "{directory}: capability-free world resolves imports: {:?}",
+                world.imports.keys().collect::<Vec<_>>()
+            );
+            assert_eq!(world.exports.len(), 1, "{directory}: exported API count");
+            let interface_id = match world.exports.values().next() {
+                Some(WorldItem::Interface { id, .. }) => *id,
+                other => panic!("{directory}: expected one exported interface, got {other:?}"),
+            };
+            let functions = resolve.interfaces[interface_id]
+                .functions
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(functions, ["parse-feed", "evaluate-rules"]);
+        }
     }
 }
