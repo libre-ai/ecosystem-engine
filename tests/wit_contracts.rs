@@ -26,7 +26,10 @@ fn canonical_wit_worlds_parse_and_resolve() {
         let (package_id, _) = resolve
             .push_dir(&path)
             .unwrap_or_else(|error| panic!("{}: {error:#}", path.display()));
-        if matches!(directory, "boussole-scoring-v2" | "notebook-core-v2") {
+        if matches!(
+            directory,
+            "boussole-scoring-v2" | "notebook-core-v2" | "policy-core-v2"
+        ) {
             let package = &resolve.packages[package_id];
             assert_eq!(package.worlds.len(), 1, "{directory}: world count");
             let world_id = *package.worlds.values().next().expect("resolved WIT world");
