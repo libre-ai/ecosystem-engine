@@ -34,3 +34,18 @@ fn canonical_biscuit_policies_parse() {
         );
     }
 }
+
+#[test]
+fn canonical_authority_template_contains_only_minimal_facts_and_expiry() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../contracts/authz/authority-v1.datalog");
+    let source =
+        fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let parsed =
+        parse_source(&source).unwrap_or_else(|errors| panic!("{}: {errors:#?}", path.display()));
+
+    assert_eq!(parsed.facts.len(), 3);
+    assert_eq!(parsed.checks.len(), 1);
+    assert!(parsed.rules.is_empty());
+    assert!(parsed.policies.is_empty());
+}
