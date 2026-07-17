@@ -17,5 +17,6 @@ serde_json.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]
+biscuit-auth.workspace = true
 biscuit-parser.workspace = true
 wit-parser.workspace = true

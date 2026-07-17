@@ -1,7 +1,11 @@
 use biscuit_parser::parser::parse_source;
 use std::{fs, path::PathBuf};
 
-const POLICIES: [(&str, usize); 2] = [("sessions-v1.datalog", 7), ("missions-v1.datalog", 6)];
+const POLICIES: [(&str, usize); 3] = [
+    ("sessions-v1.datalog", 7),
+    ("missions-v1.datalog", 6),
+    ("agent-runs-v1.datalog", 15),
+];
 
 #[test]
 fn canonical_biscuit_policies_parse() {
