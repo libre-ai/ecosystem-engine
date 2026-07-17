@@ -29,7 +29,7 @@ fn canonical_wit_worlds_parse_and_resolve() {
             .unwrap_or_else(|error| panic!("{}: {error:#}", path.display()));
         if matches!(
             directory,
-            "boussole-scoring-v2" | "notebook-core-v2" | "radar-engine-v2"
+            "boussole-scoring-v2" | "notebook-core-v2" | "policy-core-v2" | "radar-engine-v2"
         ) {
             let package = &resolve.packages[package_id];
             assert_eq!(package.worlds.len(), 1, "{directory}: world count");
