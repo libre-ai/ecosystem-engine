@@ -27,8 +27,10 @@ fn canonical_wit_worlds_parse_and_resolve() {
         let (package_id, _) = resolve
             .push_dir(&path)
             .unwrap_or_else(|error| panic!("{}: {error:#}", path.display()));
-
-        if directory == "radar-engine-v2" {
+        if matches!(
+            directory,
+            "boussole-scoring-v2" | "notebook-core-v2" | "radar-engine-v2"
+        ) {
             let package = &resolve.packages[package_id];
             assert_eq!(package.worlds.len(), 1, "{directory}: world count");
             let world_id = *package.worlds.values().next().expect("resolved WIT world");
@@ -39,16 +41,18 @@ fn canonical_wit_worlds_parse_and_resolve() {
                 world.imports.keys().collect::<Vec<_>>()
             );
             assert_eq!(world.exports.len(), 1, "{directory}: exported API count");
-            let interface_id = match world.exports.values().next() {
-                Some(WorldItem::Interface { id, .. }) => *id,
-                other => panic!("{directory}: expected one exported interface, got {other:?}"),
-            };
-            let functions = resolve.interfaces[interface_id]
-                .functions
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<_>>();
-            assert_eq!(functions, ["parse-feed", "evaluate-rules"]);
+            if directory == "radar-engine-v2" {
+                let interface_id = match world.exports.values().next() {
+                    Some(WorldItem::Interface { id, .. }) => *id,
+                    other => panic!("{directory}: expected one exported interface, got {other:?}"),
+                };
+                let functions = resolve.interfaces[interface_id]
+                    .functions
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>();
+                assert_eq!(functions, ["parse-feed", "evaluate-rules"]);
+            }
         }
     }
 }
