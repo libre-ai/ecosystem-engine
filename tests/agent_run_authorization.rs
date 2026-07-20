@@ -37,6 +37,12 @@ struct AuthzVector {
     resource_subject_digest: Option<String>,
     subject_type: Option<String>,
     quorum_valid: Option<bool>,
+    #[serde(default)]
+    agent_fleet: Option<String>,
+    #[serde(default)]
+    resource_fleet: Option<String>,
+    #[serde(default)]
+    mission_agent: Option<String>,
     expected: String,
 }
 
@@ -68,6 +74,12 @@ fn token_source(vector: &AuthzVector) -> String {
     push_fact(&mut source, "user", &["fixture-agent"]);
     push_fact(&mut source, "tenant", &[&vector.tenant]);
     push_fact(&mut source, "role", &["fixture-agent", &vector.role]);
+    if let Some(fleet) = vector.agent_fleet.as_deref() {
+        push_fact(&mut source, "agent_fleet", &["fixture-agent", fleet]);
+    }
+    if let Some(mission) = vector.mission_agent.as_deref() {
+        push_fact(&mut source, "mission_agent", &["fixture-agent", mission]);
+    }
     for (name, value) in [
         ("token_mission", vector.token_mission.as_deref()),
         ("token_run", vector.token_run.as_deref()),
@@ -97,6 +109,9 @@ fn authorizer_source(vector: &AuthzVector, policy: &str) -> String {
     push_fact(&mut source, "resource", &[RESOURCE]);
     push_fact(&mut source, "operation", &[&vector.operation]);
     push_fact(&mut source, "resource_tenant", &[&vector.resource_tenant]);
+    if let Some(fleet) = vector.resource_fleet.as_deref() {
+        push_fact(&mut source, "resource_fleet", &[fleet]);
+    }
     for (name, value) in [
         ("resource_mission", vector.resource_mission.as_deref()),
         ("resource_run", vector.resource_run.as_deref()),
@@ -160,6 +175,58 @@ fn selected_biscuit_engine_matches_all_agent_run_vectors() {
             .expect("authz vectors must be readable"),
     )
     .expect("authz vectors must deserialize");
+    let signing_key = KeyPair::new();
+    let active_keys = HashMap::from([(ROOT_KEY_ID, signing_key.public())]);
+    let limits = RunLimits {
+        max_facts: 256,
+        max_iterations: 32,
+        max_time: Duration::from_millis(50),
+    };
+
+    for vector in vectors.cases {
+        let mut builder = Biscuit::builder();
+        builder.set_root_key_id(ROOT_KEY_ID);
+        builder
+            .add_code(token_source(&vector))
+            .unwrap_or_else(|error| panic!("{}: token source rejected: {error}", vector.id));
+        let token = builder
+            .build(&signing_key)
+            .unwrap_or_else(|error| panic!("{}: token build failed: {error}", vector.id));
+        let serialized = token
+            .to_vec()
+            .unwrap_or_else(|error| panic!("{}: token serialization failed: {error}", vector.id));
+        let verified = verify_with_active_keys(&serialized, &active_keys)
+            .unwrap_or_else(|error| panic!("{}: token verification failed: {error}", vector.id));
+        let mut authorizer = verified
+            .authorizer()
+            .unwrap_or_else(|error| panic!("{}: authorizer build failed: {error}", vector.id));
+        authorizer
+            .add_code(authorizer_source(&vector, &policy))
+            .unwrap_or_else(|error| panic!("{}: authorizer source rejected: {error}", vector.id));
+        let actual = if authorizer.authorize_with_limits(limits.clone()).is_ok() {
+            "allow"
+        } else {
+            "deny"
+        };
+        assert_eq!(actual, vector.expected, "{}", vector.id);
+    }
+}
+
+// Runtime proof (real biscuit, not the TS mirror) that agent-runs-v2 enforces
+// the loop-security kernel K1 identity boundary: an agent token carrying
+// agent_fleet/mission_agent facts is denied cross-fleet and out-of-mission by
+// the real authorizer. token_source emits the K1 facts (present only in v2
+// vectors); authorizer_source injects resource_fleet at the simulated handler.
+#[test]
+fn selected_biscuit_engine_matches_all_agent_run_v2_vectors() {
+    let root = contract_root();
+    let policy = fs::read_to_string(root.join("authz/agent-runs-v2.datalog"))
+        .expect("agent-run v2 policy must be readable");
+    let vectors: AuthzVectors = serde_json::from_str(
+        &fs::read_to_string(root.join("fixtures/agent-orchestration-v1/authz-vectors.v2.json"))
+            .expect("authz v2 vectors must be readable"),
+    )
+    .expect("authz v2 vectors must deserialize");
     let signing_key = KeyPair::new();
     let active_keys = HashMap::from([(ROOT_KEY_ID, signing_key.public())]);
     let limits = RunLimits {
