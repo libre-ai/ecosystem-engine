@@ -6,7 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn source_documents() -> Vec<SourceDocument> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ecosystem/objects");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("node_modules/@libre-ai/governance/ecosystem/objects");
     let mut paths = Vec::new();
     collect_json_files(&root, &mut paths);
     paths.sort();
