@@ -10,7 +10,7 @@ const POLICIES: [(&str, usize); 4] = [
 
 #[test]
 fn canonical_biscuit_policies_parse() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../contracts/authz");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("vendored/authz");
 
     for (name, expected_policy_count) in POLICIES {
         let path = root.join(name);
@@ -42,8 +42,8 @@ fn canonical_biscuit_policies_parse() {
 
 #[test]
 fn canonical_authority_template_contains_only_minimal_facts_and_expiry() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../contracts/authz/authority-v1.datalog");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("vendored/authz/authority-v1.datalog");
     let source =
         fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     let parsed =

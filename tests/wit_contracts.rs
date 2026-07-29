@@ -4,7 +4,7 @@ use wit_parser::WorldItem;
 
 #[test]
 fn canonical_wit_worlds_parse_and_resolve() {
-    let contracts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../contracts/wit");
+    let contracts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("vendored/wit");
     let mut worlds = fs::read_dir(&contracts)
         .expect("read WIT contract directory")
         .filter_map(Result::ok)

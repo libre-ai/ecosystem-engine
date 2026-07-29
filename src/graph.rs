@@ -321,7 +321,7 @@ fn knowledge_validator() -> Result<&'static Validator, GraphError> {
     KNOWLEDGE_VALIDATOR
         .get_or_init(|| {
             let schema: Value = serde_json::from_str(include_str!(
-                "../../../ecosystem/schemas/knowledge-object.schema.json"
+                "../vendored/ecosystem-schemas/knowledge-object.schema.json"
             ))
             .map_err(|error| error.to_string())?;
             jsonschema::options()

@@ -162,7 +162,8 @@ fn revocation_allows(token: &Biscuit, store: RevocationStore<'_>) -> bool {
 }
 
 fn contract_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../contracts")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("node_modules/@libre-ai/contracts-authority/contracts")
 }
 
 #[test]

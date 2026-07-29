@@ -51,7 +51,7 @@ fn projection_is_byte_identical_for_any_input_order_and_matches_checked_output()
         .expect("reversed public projection bytes");
     assert_eq!(expected, reversed);
 
-    let checked = include_bytes!("../../../ecosystem/projections/public.v1.json");
+    let checked = include_bytes!("../vendored/ecosystem-projections/public.v1.json");
     assert_eq!(expected, checked);
 }
 
