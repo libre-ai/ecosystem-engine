@@ -70,3 +70,92 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --locked --all-features
+
+  dependency-policy:
+    name: Dependency policy
+    runs-on: ubuntu-latest
+    # `deny.toml` has been versioned here since the workspace was bootstrapped and
+    # no workflow ever ran it: the licence allowlist, the ban rules and the
+    # `unknown-git = "deny"` source policy were declarations, not gates. This job
+    # executes them, and splits the policy on a single criterion — does the
+    # verdict depend only on the contents of this commit?
+    #
+    #   bans / licenses / sources -> yes. The same tree yields the same verdict
+    #     forever, so a failure always means something changed here, and the
+    #     author who changed it is the one who can fix it. Blocking.
+    #
+    #   advisories (and `yanked`) -> no. The verdict flips when RustSec publishes
+    #     an advisory or a maintainer yanks a release, with no commit on this
+    #     repository. Gating on that turns an untouched repository red, blocks
+    #     unrelated work for a reason its author cannot address, and teaches
+    #     reviewers that a red check is something you re-run rather than
+    #     something you read. Reported loudly, never blocking: reacting to a new
+    #     advisory is a decision to take, not a merge condition.
+    #
+    # Both tools are pinned to an exact version and verified by SHA-256, like the
+    # Bun archive above — an unpinned auditing tool is itself an unaudited
+    # dependency, and `cargo install` would resolve and build a fresh one on
+    # every run.
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable action
+      - name: Install pinned cargo-deny and cargo-audit
+        env:
+          CARGO_DENY_URL: https://github.com/EmbarkStudios/cargo-deny/releases/download/0.19.5/cargo-deny-0.19.5-x86_64-unknown-linux-musl.tar.gz
+          CARGO_DENY_SHA256: 5ea64ae09959b5fe1072d898f95caaa89b374678ba6728d5e9ed1366745479b0
+          CARGO_AUDIT_URL: https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.22.1/cargo-audit-x86_64-unknown-linux-musl-v0.22.1.tgz
+          CARGO_AUDIT_SHA256: c32506f338bdcdaef5a17fb9f33abb6ecf9561324cfd34237fd335f9283a1eab
+        run: |
+          bin="$RUNNER_TEMP/dependency-policy-bin"
+          mkdir -p "$bin"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/cargo-deny.tar.gz" "$CARGO_DENY_URL"
+          echo "$CARGO_DENY_SHA256  $RUNNER_TEMP/cargo-deny.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/cargo-deny.tar.gz" -C "$bin" --strip-components=1 \
+            cargo-deny-0.19.5-x86_64-unknown-linux-musl/cargo-deny
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/cargo-audit.tgz" "$CARGO_AUDIT_URL"
+          echo "$CARGO_AUDIT_SHA256  $RUNNER_TEMP/cargo-audit.tgz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/cargo-audit.tgz" -C "$bin" --strip-components=1 \
+            cargo-audit-x86_64-unknown-linux-musl-v0.22.1/cargo-audit
+          chmod +x "$bin/cargo-deny" "$bin/cargo-audit"
+          echo "$bin" >> "$GITHUB_PATH"
+      - name: Enforce the policy — bans, licences, sources (blocking)
+        run: |
+          echo "tool:   $(cargo deny --version)"
+          echo "policy: deny.toml, sha256 $(sha256sum deny.toml | cut -d' ' -f1)"
+          echo "graph:  $(grep -c '^\[\[package\]\]' Cargo.lock) crates in Cargo.lock"
+          # Concise on success; the inclusion graphs are only useful when
+          # something fails, and they are long enough to bury the verdict.
+          if cargo deny --log-level info check bans licenses sources \
+            --show-stats --hide-inclusion-graph; then
+            echo "verdict: bans PASS, licences PASS, sources PASS"
+          else
+            echo "verdict: FAILED — re-running with inclusion graphs to show why"
+            cargo deny check bans licenses sources --show-stats || true
+            exit 1
+          fi
+      - name: Report advisories — RustSec and yanked releases (never blocking)
+        # `!cancelled()`: the advisory half is independent of the blocking half,
+        # so it still runs when the blocking step above fails — that is precisely
+        # when someone reading a red job wants to know whether there is also a
+        # live vulnerability. Without it GitHub skips this step and the report
+        # evaporates exactly when it is most needed. `continue-on-error` makes the
+        # "never blocking" contract structural instead of a side effect of this
+        # script happening to end on a zero exit.
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          echo "tool:   $(cargo audit --version)"
+          echo "graph:  $(grep -c '^\[\[package\]\]' Cargo.lock) crates in Cargo.lock"
+          findings=0
+          cargo audit || findings=1
+          # `[advisories] yanked = "deny"` also lives in deny.toml, and would
+          # otherwise be the one section of the versioned policy still never
+          # executed. Same time-dependent verdict, so same non-blocking status.
+          cargo deny --log-level info check advisories \
+            --show-stats --hide-inclusion-graph || findings=1
+          if [ "$findings" -ne 0 ]; then
+            echo "::warning title=Dependency advisories::cargo audit or cargo deny advisories reported findings; read the log of this job. Deliberately not blocking — this verdict can change with no commit on this repository."
+            echo "verdict: advisories REPORTED FINDINGS (non-blocking, see log)"
+          else
+            echo "verdict: advisories CLEAN, no yanked release"
+          fi
