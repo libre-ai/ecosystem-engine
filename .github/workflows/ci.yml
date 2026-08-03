@@ -134,6 +134,15 @@ jobs:
             exit 1
           fi
       - name: Report advisories — RustSec and yanked releases (never blocking)
+        # `!cancelled()`: the advisory half is independent of the blocking half,
+        # so it still runs when the blocking step above fails — that is precisely
+        # when someone reading a red job wants to know whether there is also a
+        # live vulnerability. Without it GitHub skips this step and the report
+        # evaporates exactly when it is most needed. `continue-on-error` makes the
+        # "never blocking" contract structural instead of a side effect of this
+        # script happening to end on a zero exit.
+        if: ${{ !cancelled() }}
+        continue-on-error: true
         run: |
           echo "tool:   $(cargo audit --version)"
           echo "graph:  $(grep -c '^\[\[package\]\]' Cargo.lock) crates in Cargo.lock"
