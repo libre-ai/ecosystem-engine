@@ -1,5 +1,6 @@
 /**
- * Orphan-rev gate for intra-organisation `[patch.crates-io]` git dependencies.
+ * Orphan-rev gate for intra-organisation `[patch.*]` git dependencies
+ * (ADR-0031 D2 + D3).
  *
  * A `{ git = "https://github.com/libre-ai/<repo>", rev = "<sha>" }` patch
  * keeps building for as long as GitHub serves the sha — and GitHub keeps
@@ -11,43 +12,248 @@
  * (`repos/<owner>/<repo>/compare/main...<rev>` -> status `identical` or
  * `behind`). `ahead` and `diverged` mean the rev is not on `main`: red.
  *
+ * Pin rule (D2): `rev` is a full lowercase 40-hex commit sha, never a branch
+ * name, a tag or a short sha; `branch =` and `tag =` are refused outright on an
+ * organisation source. The manifest is read with a real TOML parser
+ * (`Bun.TOML.parse`), so key order, quoting, spacing, the inline-table and the
+ * dedicated-table (`[patch.crates-io.<crate>]`) forms are all the same entry,
+ * and every `[patch.<source>]` section is scanned, not only `crates-io`.
+ *
+ * A gate that is green on what it cannot read is not a gate (D3): the number
+ * of patch entries of every kind is printed so that a zero is a verifiable
+ * fact; an entry the parser does not understand is red ("cannot parse"); and
+ * the count of organisation git sources found in the raw text is compared to
+ * the count found in the parsed tree, so a lenient parser cannot drop one
+ * silently.
+ *
  * Re-pin sequence after the producer squash-merges (ADR-0031): read the merge
  * commit on `main`, replace `rev`, `cargo update -p <crate>` (that package
  * only), run this gate, open the bump pull request.
  */
 
 const ORGANISATION = "libre-ai";
-const PATCH_SECTION = "[patch.crates-io]";
+const FULL_SHA = /^[0-9a-f]{40}$/;
+const ORGANISATION_SOURCE = new RegExp(`github\\.com[/:]${ORGANISATION}/`, "gi");
 
 export interface GitPatch {
+  /** Patched source: `crates-io` or the URL of a `[patch."https://…"]` section. */
+  readonly section: string;
   readonly crate: string;
   readonly owner: string;
   readonly repo: string;
   readonly rev: string;
 }
 
+export interface PatchRejection {
+  readonly section: string;
+  readonly crate: string;
+  readonly reason: string;
+}
+
+export interface PatchScan {
+  /** Every entry under every `[patch.<source>]` table, whatever its kind. */
+  readonly entries: number;
+  /** Organisation git sources found in the parsed tree, anywhere in the manifest. */
+  readonly organisationSources: number;
+  /** Intra-organisation git patches pinned by a full sha: the ones the network check runs on. */
+  readonly patches: GitPatch[];
+  /** Intra-organisation git patches that violate the pin rule or cannot be read. */
+  readonly rejections: PatchRejection[];
+}
+
 export type CompareStatus = "identical" | "behind" | "ahead" | "diverged";
 
-/** Extracts `crate = { git = "https://github.com/<owner>/<repo>", rev = "<sha>" }` lines of the patch section. */
-export function parseGitPatches(cargoToml: string): GitPatch[] {
-  const lines = cargoToml.split("\n");
-  const start = lines.findIndex((line) => line.trim() === PATCH_SECTION);
-  if (start < 0) return [];
-  const patches: GitPatch[] = [];
-  for (const line of lines.slice(start + 1)) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("[")) break;
-    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
-    const match = trimmed.match(
-      /^([A-Za-z0-9_-]+)\s*=\s*\{[^}]*\bgit\s*=\s*"https:\/\/github\.com\/([^/"]+)\/([^/"]+?)(?:\.git)?"[^}]*\brev\s*=\s*"([0-9a-f]{40})"[^}]*\}/,
-    );
-    if (match === null) continue;
-    const [, crate, owner, repo, rev] = match;
-    if (crate === undefined || owner === undefined || repo === undefined || rev === undefined)
-      continue;
-    patches.push({ crate, owner, repo, rev });
+export type TomlParser = (input: string) => unknown;
+
+/** The manifest, or one of its patch tables, cannot be read: the gate must not report zero. */
+export class CargoTomlParseError extends Error {
+  override readonly name = "CargoTomlParseError";
+}
+
+type TomlTable = Record<string, unknown>;
+
+function isTable(value: unknown): value is TomlTable {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+interface OrganisationRepository {
+  readonly owner: string;
+  readonly repo: string;
+}
+
+/**
+ * Owner and repository of a GitHub git source, in its `https://`, `ssh://` or
+ * scp-like (`git@github.com:owner/repo`) spelling; null for any other host.
+ */
+function parseGitHubSource(git: string): OrganisationRepository | null {
+  const scpLike = git.match(/^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+  if (scpLike !== null) {
+    const [, owner, repo] = scpLike;
+    if (owner !== undefined && repo !== undefined) return { owner, repo };
+    return null;
   }
-  return patches;
+  let url: URL;
+  try {
+    url = new URL(git);
+  } catch {
+    return null;
+  }
+  if (url.hostname.toLowerCase() !== "github.com") return null;
+  const [owner, repoSegment] = url.pathname.split("/").filter((segment) => segment.length > 0);
+  if (owner === undefined || repoSegment === undefined) return null;
+  return { owner, repo: repoSegment.replace(/\.git$/i, "") };
+}
+
+function isOrganisationSource(git: string): boolean {
+  const source = parseGitHubSource(git);
+  return source !== null && source.owner.toLowerCase() === ORGANISATION;
+}
+
+/** Counts organisation git sources among the string values of a parsed TOML tree. */
+function countOrganisationSourcesInTree(value: unknown): number {
+  if (typeof value === "string") return isOrganisationSource(value) ? 1 : 0;
+  if (Array.isArray(value))
+    return value.reduce<number>((n, v) => n + countOrganisationSourcesInTree(v), 0);
+  if (isTable(value)) {
+    // Keys count too: a `[patch."https://github.com/libre-ai/<repo>"]` header is a source.
+    return Object.entries(value).reduce<number>(
+      (n, [key, v]) => n + (isOrganisationSource(key) ? 1 : 0) + countOrganisationSourcesInTree(v),
+      0,
+    );
+  }
+  return 0;
+}
+
+/**
+ * Removes `#` comments from a TOML text, keeping `#` inside basic (`"`) and
+ * literal (`'`) strings. Multi-line strings are not special-cased: a comment
+ * marker inside one is a false negative of the cross-check, never a false
+ * positive, and Cargo manifests do not carry git URLs in multi-line strings.
+ */
+function stripComments(toml: string): string {
+  let out = "";
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < toml.length; i += 1) {
+    const char = toml[i] ?? "";
+    if (quote === null) {
+      if (char === "#") {
+        while (i < toml.length && toml[i] !== "\n") i += 1;
+        out += "\n";
+        continue;
+      }
+      if (char === '"' || char === "'") quote = char;
+    } else if (char === "\\" && quote === '"') {
+      out += char + (toml[i + 1] ?? "");
+      i += 1;
+      continue;
+    } else if (char === quote) {
+      quote = null;
+    }
+    out += char;
+  }
+  return out;
+}
+
+function countOrganisationSourcesInText(toml: string): number {
+  return stripComments(toml).match(ORGANISATION_SOURCE)?.length ?? 0;
+}
+
+function classifyEntry(
+  section: string,
+  crate: string,
+  entry: unknown,
+): GitPatch | PatchRejection | null {
+  if (!isTable(entry)) {
+    // A string here is a registry version spec cargo would refuse under [patch],
+    // and anything else is a shape this gate does not know: both are "cannot parse".
+    const text = typeof entry === "string" ? entry : JSON.stringify(entry);
+    if (text.match(ORGANISATION_SOURCE) === null) return null;
+    return {
+      section,
+      crate,
+      reason: `cannot parse: expected a table, found ${JSON.stringify(entry)}`,
+    };
+  }
+  const git = entry.git;
+  if (git === undefined) return null;
+  if (typeof git !== "string") {
+    return { section, crate, reason: `cannot parse: git = ${JSON.stringify(git)} is not a string` };
+  }
+  const source = parseGitHubSource(git);
+  if (source === null || source.owner.toLowerCase() !== ORGANISATION) return null;
+  for (const key of ["branch", "tag"] as const) {
+    const value = entry[key];
+    if (value !== undefined) {
+      return {
+        section,
+        crate,
+        reason: `${key} = ${JSON.stringify(value)} is forbidden on an organisation source: pin a full 40-hex commit sha with rev (ADR-0031 D2)`,
+      };
+    }
+  }
+  const rev = entry.rev;
+  if (rev === undefined) {
+    return { section, crate, reason: "no rev: pin a full 40-hex commit sha (ADR-0031 D2)" };
+  }
+  if (typeof rev !== "string" || !FULL_SHA.test(rev)) {
+    return {
+      section,
+      crate,
+      reason: `rev ${JSON.stringify(rev)} is not a full lowercase 40-hex sha: a branch, a tag or a short sha is not a pin (ADR-0031 D2)`,
+    };
+  }
+  return { section, crate, owner: source.owner, repo: source.repo, rev };
+}
+
+/**
+ * Reads every `[patch.<source>]` entry of a Cargo manifest and sorts the
+ * intra-organisation git ones into accepted pins and named rejections.
+ *
+ * @throws CargoTomlParseError when the manifest or a patch table cannot be read,
+ *   or when the raw text mentions more organisation git sources than the parsed tree.
+ */
+export function scanPatches(cargoToml: string, parse: TomlParser = Bun.TOML.parse): PatchScan {
+  let document: unknown;
+  try {
+    document = parse(cargoToml);
+  } catch (error) {
+    throw new CargoTomlParseError(`Cargo.toml: ${(error as Error).message}`);
+  }
+  if (!isTable(document)) throw new CargoTomlParseError("Cargo.toml: not a TOML table");
+
+  const inText = countOrganisationSourcesInText(cargoToml);
+  const inTree = countOrganisationSourcesInTree(document);
+  if (inText > inTree) {
+    throw new CargoTomlParseError(
+      `Cargo.toml: ${inText} organisation git source(s) in the text, ${inTree} in the parsed manifest — the parser dropped one`,
+    );
+  }
+
+  const scan = { entries: 0, organisationSources: inTree, patches: [], rejections: [] } as {
+    entries: number;
+    organisationSources: number;
+    patches: GitPatch[];
+    rejections: PatchRejection[];
+  };
+  const patch = document.patch;
+  if (patch === undefined) return scan;
+  if (!isTable(patch)) throw new CargoTomlParseError("Cargo.toml: [patch] is not a table");
+
+  for (const [section, table] of Object.entries(patch)) {
+    if (!isTable(table)) {
+      throw new CargoTomlParseError(
+        `Cargo.toml: [patch.${JSON.stringify(section)}] is not a table`,
+      );
+    }
+    for (const [crate, entry] of Object.entries(table)) {
+      scan.entries += 1;
+      const classified = classifyEntry(section, crate, entry);
+      if (classified === null) continue;
+      if ("rev" in classified) scan.patches.push(classified);
+      else scan.rejections.push(classified);
+    }
+  }
+  return scan;
 }
 
 /** A rev is acceptable only when `main` already contains it. */
@@ -81,13 +287,24 @@ async function compareStatus(patch: GitPatch, token: string | undefined): Promis
 
 if (import.meta.main) {
   const cargoToml = await Bun.file("Cargo.toml").text();
-  const patches = parseGitPatches(cargoToml).filter((patch) => patch.owner === ORGANISATION);
+  let scan: PatchScan;
+  try {
+    scan = scanPatches(cargoToml);
+  } catch (error) {
+    console.error(`Orphan-rev gate: CANNOT PARSE ${(error as Error).message}`);
+    console.error("Orphan-rev gate: FAILED");
+    process.exit(1);
+  }
   console.log(
-    `Orphan-rev gate: ${patches.length} intra-organisation git patch(es) in ${PATCH_SECTION}`,
+    `Orphan-rev gate: ${scan.entries} patch entr${scan.entries === 1 ? "y" : "ies"} under [patch.*] (all sources), ${scan.organisationSources} github.com/${ORGANISATION} URL(s) in the manifest (text and parsed tree agree), ${scan.patches.length} intra-organisation patch(es) pinned by a full sha, ${scan.rejections.length} rejected`,
   );
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   let failures = 0;
-  for (const patch of patches) {
+  for (const rejection of scan.rejections) {
+    console.error(`  FAIL ${rejection.crate} [patch.${rejection.section}]: ${rejection.reason}`);
+    failures += 1;
+  }
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  for (const patch of scan.patches) {
     let status: CompareStatus;
     try {
       status = await compareStatus(patch, token);

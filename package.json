@@ -28,7 +28,7 @@
     "lint": "bun run check:bun:runtime && biome ci .",
     "typecheck": "bun run check:bun:runtime && tsc --noEmit -p tsconfig.json",
     "test": "cargo test --locked",
-    "check": "bun run check:bun && bun run check:toolchain && bun run check:schemas && bun run check:secret-scan && bun run check:personal-data && bun run check:patch-rev && bun run lint && bun run typecheck",
+    "check": "bun run check:bun && bun run check:toolchain && bun run check:schemas && bun run check:secret-scan && bun run check:personal-data && bun run lint && bun run typecheck && bun run check:patch-rev",
     "pretest": "bun run check:bun"
   }
 }
