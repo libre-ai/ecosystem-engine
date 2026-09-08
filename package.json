@@ -24,10 +24,11 @@
     "check:schemas": "bun run check:bun:runtime && bun scripts/check-vendored.ts",
     "check:secret-scan": "bun run check:bun:runtime && bun node_modules/@libre-ai/governance/tools/quality/check-secret-scan.ts",
     "check:personal-data": "bun run check:bun:runtime && bun node_modules/@libre-ai/governance/tools/quality/check-personal-data-boundary.ts",
+    "check:patch-rev": "bun run check:bun:runtime && bun test scripts/check-patch-rev.test.ts && bun scripts/check-patch-rev.ts",
     "lint": "bun run check:bun:runtime && biome ci .",
     "typecheck": "bun run check:bun:runtime && tsc --noEmit -p tsconfig.json",
     "test": "cargo test --locked",
-    "check": "bun run check:bun && bun run check:toolchain && bun run check:schemas && bun run check:secret-scan && bun run check:personal-data && bun run lint && bun run typecheck",
+    "check": "bun run check:bun && bun run check:toolchain && bun run check:schemas && bun run check:secret-scan && bun run check:personal-data && bun run check:patch-rev && bun run lint && bun run typecheck",
     "pretest": "bun run check:bun"
   }
 }
