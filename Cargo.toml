@@ -30,7 +30,8 @@ wit-parser = { version = "=0.253.0", default-features = false, features = ["std"
 # single vendored copy of the fleet (archive + #306, provenance and removal
 # condition in its third_party/biscuit-auth-6.0.0/PATCH.md). This dev-dep is
 # resolved to that same copy rather than to a second one, so the two crates
-# cannot drift. The rev pins the authz-biscuit migration branch head; it must
-# be re-pinned to the merge commit once libre-ai/authz-biscuit#12 lands.
+# cannot drift. The rev pins the squash-merge commit of libre-ai/authz-biscuit#12
+# on main (ADR-0031 D2/D3: a full sha reachable from the home's main, checked
+# by scripts/check-patch-rev.ts).
 [patch.crates-io]
-biscuit-auth = { git = "https://github.com/libre-ai/authz-biscuit", rev = "81ce4b579d383f8368f06c8f4e6e3765b518225f" }
+biscuit-auth = { git = "https://github.com/libre-ai/authz-biscuit", rev = "ac7bfa31d6121c7a004219c6bfbe549751c5c876" }
