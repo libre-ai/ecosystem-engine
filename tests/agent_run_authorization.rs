@@ -1,4 +1,4 @@
-use biscuit_auth::{Biscuit, KeyPair, PublicKey, datalog::RunLimits, error};
+use biscuit_auth::{AuthorizerBuilder, Biscuit, KeyPair, PublicKey, datalog::RunLimits, error};
 use serde::Deserialize;
 use std::{
     collections::{HashMap, HashSet},
@@ -185,12 +185,12 @@ fn selected_biscuit_engine_matches_all_agent_run_vectors() {
     };
 
     for vector in vectors.cases {
-        let mut builder = Biscuit::builder();
-        builder.set_root_key_id(ROOT_KEY_ID);
-        builder
-            .add_code(token_source(&vector))
-            .unwrap_or_else(|error| panic!("{}: token source rejected: {error}", vector.id));
-        let token = builder
+        // biscuit-auth 6.0: consuming builders, and the authorizer is declared
+        // on an AuthorizerBuilder then built against the verified token.
+        let token = Biscuit::builder()
+            .root_key_id(ROOT_KEY_ID)
+            .code(token_source(&vector))
+            .unwrap_or_else(|error| panic!("{}: token source rejected: {error}", vector.id))
             .build(&signing_key)
             .unwrap_or_else(|error| panic!("{}: token build failed: {error}", vector.id));
         let serialized = token
@@ -198,12 +198,11 @@ fn selected_biscuit_engine_matches_all_agent_run_vectors() {
             .unwrap_or_else(|error| panic!("{}: token serialization failed: {error}", vector.id));
         let verified = verify_with_active_keys(&serialized, &active_keys)
             .unwrap_or_else(|error| panic!("{}: token verification failed: {error}", vector.id));
-        let mut authorizer = verified
-            .authorizer()
+        let mut authorizer = AuthorizerBuilder::new()
+            .code(authorizer_source(&vector, &policy))
+            .unwrap_or_else(|error| panic!("{}: authorizer source rejected: {error}", vector.id))
+            .build(&verified)
             .unwrap_or_else(|error| panic!("{}: authorizer build failed: {error}", vector.id));
-        authorizer
-            .add_code(authorizer_source(&vector, &policy))
-            .unwrap_or_else(|error| panic!("{}: authorizer source rejected: {error}", vector.id));
         let actual = if authorizer.authorize_with_limits(limits.clone()).is_ok() {
             "allow"
         } else {
@@ -237,12 +236,12 @@ fn selected_biscuit_engine_matches_all_agent_run_v2_vectors() {
     };
 
     for vector in vectors.cases {
-        let mut builder = Biscuit::builder();
-        builder.set_root_key_id(ROOT_KEY_ID);
-        builder
-            .add_code(token_source(&vector))
-            .unwrap_or_else(|error| panic!("{}: token source rejected: {error}", vector.id));
-        let token = builder
+        // biscuit-auth 6.0: consuming builders, and the authorizer is declared
+        // on an AuthorizerBuilder then built against the verified token.
+        let token = Biscuit::builder()
+            .root_key_id(ROOT_KEY_ID)
+            .code(token_source(&vector))
+            .unwrap_or_else(|error| panic!("{}: token source rejected: {error}", vector.id))
             .build(&signing_key)
             .unwrap_or_else(|error| panic!("{}: token build failed: {error}", vector.id));
         let serialized = token
@@ -250,12 +249,11 @@ fn selected_biscuit_engine_matches_all_agent_run_v2_vectors() {
             .unwrap_or_else(|error| panic!("{}: token serialization failed: {error}", vector.id));
         let verified = verify_with_active_keys(&serialized, &active_keys)
             .unwrap_or_else(|error| panic!("{}: token verification failed: {error}", vector.id));
-        let mut authorizer = verified
-            .authorizer()
+        let mut authorizer = AuthorizerBuilder::new()
+            .code(authorizer_source(&vector, &policy))
+            .unwrap_or_else(|error| panic!("{}: authorizer source rejected: {error}", vector.id))
+            .build(&verified)
             .unwrap_or_else(|error| panic!("{}: authorizer build failed: {error}", vector.id));
-        authorizer
-            .add_code(authorizer_source(&vector, &policy))
-            .unwrap_or_else(|error| panic!("{}: authorizer source rejected: {error}", vector.id));
         let actual = if authorizer.authorize_with_limits(limits.clone()).is_ok() {
             "allow"
         } else {
@@ -269,22 +267,18 @@ fn selected_biscuit_engine_matches_all_agent_run_v2_vectors() {
 fn root_key_rotation_and_registry_outage_fail_closed() {
     let old_key = KeyPair::new();
     let current_key = KeyPair::new();
-    let mut old_builder = Biscuit::builder();
-    old_builder.set_root_key_id(1);
-    old_builder
-        .add_code("user(\"old-fixture\");")
-        .expect("old token source must parse");
-    let old_token = old_builder
+    let old_token = Biscuit::builder()
+        .root_key_id(1)
+        .code("user(\"old-fixture\");")
+        .expect("old token source must parse")
         .build(&old_key)
         .expect("old token must build")
         .to_vec()
         .expect("old token must serialize");
-    let mut current_builder = Biscuit::builder();
-    current_builder.set_root_key_id(2);
-    current_builder
-        .add_code("user(\"current-fixture\");")
-        .expect("current token source must parse");
-    let current_token = current_builder
+    let current_token = Biscuit::builder()
+        .root_key_id(2)
+        .code("user(\"current-fixture\");")
+        .expect("current token source must parse")
         .build(&current_key)
         .expect("current token must build")
         .to_vec()
@@ -303,12 +297,12 @@ fn root_key_rotation_and_registry_outage_fail_closed() {
 #[test]
 fn root_block_revocation_and_store_outage_fail_closed() {
     let signing_key = KeyPair::new();
-    let mut builder = Biscuit::builder();
-    builder.set_root_key_id(ROOT_KEY_ID);
-    builder
-        .add_code("user(\"revocation-fixture\");")
-        .expect("token source must parse");
-    let token = builder.build(&signing_key).expect("token must build");
+    let token = Biscuit::builder()
+        .root_key_id(ROOT_KEY_ID)
+        .code("user(\"revocation-fixture\");")
+        .expect("token source must parse")
+        .build(&signing_key)
+        .expect("token must build");
     let root_id = token
         .revocation_identifiers()
         .into_iter()
