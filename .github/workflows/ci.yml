@@ -48,7 +48,13 @@ jobs:
         run: |
           test "$(bun --revision)" = "1.4.0-canary.1+57f349f63"
           bun run check:toolchain
+      # `check:patch-rev` asks the GitHub compare API whether every
+      # intra-organisation `[patch.crates-io]` rev is on the producer's main;
+      # the workflow token keeps that read within the authenticated rate limit
+      # (the job's permissions stay contents: read).
       - run: bun run check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   rust-quality:
     name: Rust quality
