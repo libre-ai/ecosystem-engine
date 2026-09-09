@@ -19,7 +19,7 @@ sha2 = { version = "=0.11.0", default-features = false }
 [dev-dependencies]
 biscuit-auth = { version = "=6.0.0", default-features = false }
 biscuit-parser = "=0.2.0"
-wit-parser = { version = "=0.253.0", default-features = false, features = ["std"] }
+wit-parser = { version = "=0.258.0", default-features = false, features = ["std"] }
 
 [workspace]
 
